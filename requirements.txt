@@ -1,0 +1,7 @@
+langgraph
+google-generativeai
+requests
+beautifulsoup4
+python-dotenv
+mlflow
+grandalf
