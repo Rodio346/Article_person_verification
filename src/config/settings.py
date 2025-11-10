@@ -34,3 +34,8 @@ REQUEST_TIMEOUT = 10  # seconds
 # --- Default Files ---
 
 DEFAULT_TEST_CASES_FILE = "test_cases.csv"
+
+# --- Rate Limiting Configuration ---
+
+# Delay between batch processing cases to avoid API rate limits (in seconds)
+BATCH_PROCESSING_DELAY = 3.0  # Adjust this based on your API quota

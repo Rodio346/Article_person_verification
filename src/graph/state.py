@@ -2,7 +2,7 @@
 State definition for the LangGraph workflow.
 """
 
-from typing import TypedDict, Literal
+from typing import TypedDict, Literal, Dict
 
 
 class GraphState(TypedDict):
@@ -19,3 +19,5 @@ class GraphState(TypedDict):
     match_explanation: str
     sentiment: Literal["Positive", "Negative", "Neutral", "N/A"]
     sentiment_explanation: str
+    # Token usage tracking
+    token_usage: Dict[str, Dict[str, int]]  # {"node_name": {"prompt_tokens": X, "completion_tokens": Y, "total_tokens": Z}}

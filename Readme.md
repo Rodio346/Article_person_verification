@@ -10,10 +10,12 @@ All executions are automatically logged to **MLflow**, providing a complete, tra
 
 * **Multi-Step Graph Logic:** Uses LangGraph to define a robust, conditional workflow with 4 verification stages
 * **Age Verification:** Early filtering step to catch obvious age mismatches before detailed verification
+* **Multilingual Support:** Process articles in any language (English, Spanish, French, German, Chinese, Arabic, etc.) with automatic language detection and cross-lingual name matching
+* **Flexible Input Methods:** Supports both URL fetching and direct text input - paste article content directly or provide a URL
 * **LLM-Powered Decisions:** Leverages Google's Gemini model for nuanced tasks like name variation matching, age verification, detail verification, and sentiment analysis
-* **Automated MLflow Tracking:** Uses `mlflow.langchain.autolog()` to automatically log all graph runs
+* **Automated MLflow Tracking:** Uses `mlflow.langchain.autolog()` to automatically log all graph runs with comprehensive metrics
 * **Full State Logging:** Logs intermediate and final states as JSON artifacts for complete traceability and debugging
-* **Flexible Inputs:** Run screenings for a single applicant or batch process a CSV file
+* **Batch Processing:** Run screenings for a single applicant or batch process CSV files with mixed URL/text inputs
 * **Modular Architecture:** Clean separation of concerns with organized project structure
 
 ---
@@ -138,9 +140,11 @@ Simply edit these prompts to customize the agent's behavior without touching any
 
 ## ▶️ Usage
 
-### 1. Single Run
+The system supports **both URL-based and direct text input** for maximum flexibility.
 
-Provide the applicant's details directly as command-line arguments:
+### 1. Single Run with URL
+
+Provide the applicant's details and article URL:
 
 ```bash
 python main.py \
@@ -149,15 +153,57 @@ python main.py \
     --article "https://www.reuters.com/article/..."
 ```
 
-### 2. Batch Run (Test File)
+### 2. Single Run with Direct Text
 
-Create a `test_cases.csv` file:
+Provide the article text directly (no URL needed):
+
+```bash
+python main.py \
+    --name "Bernie Madoff" \
+    --dob "29/04/1938" \
+    --text "Bernie Madoff, 70, was sentenced to 150 years in prison for running a massive Ponzi scheme..."
+```
+
+Or use `--article` with text (system auto-detects if it's a URL or text):
+
+```bash
+python main.py \
+    --name "Bernie Madoff" \
+    --dob "29/04/1938" \
+    --article "Bernie Madoff, 70, was sentenced to 150 years..."
+```
+
+### 3. Batch Run with URLs (Test File)
+
+Create a `test_cases.csv` file with URLs:
 
 ```csv
 name,dob,url
 Bernie Madoff,29/04/1938,https://www.reuters.com/article/...
 Jane Smith,12/05/1990,https://www.nytimes.com/article/...
 ```
+
+### 4. Batch Run with Direct Text
+
+Create a `test_cases.csv` file with article text:
+
+```csv
+name,dob,text
+Bernie Madoff,29/04/1938,"Bernie Madoff, 70, was sentenced to 150 years in prison for running a massive Ponzi scheme that defrauded thousands of investors."
+Jane Smith,12/05/1990,"Jane Smith, 33, opened a successful bakery in downtown Manhattan."
+```
+
+### 5. Mixed Batch (URLs and Text)
+
+You can mix both in the same CSV:
+
+```csv
+name,dob,url,text
+Bernie Madoff,29/04/1938,https://www.reuters.com/article/...,
+Jane Smith,12/05/1990,,"Jane Smith, 33, opened a successful bakery."
+```
+
+**Note:** If both `url` and `text` columns exist, `text` takes precedence.
 
 Then run:
 
@@ -216,15 +262,56 @@ Each step in the graph execution is logged, allowing you to see:
 
 ---
 
-## 🎯 Use Cases
+## 🌍 Multilingual Support
 
-- **Financial Compliance**: Screen applicants for adverse media in banking/finance
-- **Background Checks**: Automated adverse media screening for HR processes
-- **Risk Assessment**: Identify potential reputational risks
-- **Due Diligence**: Research individuals for business partnerships
+The system is designed to process articles in **any language** using Google's Gemini multilingual capabilities.
+
+### Supported Languages
+
+The system can process articles in:
+- **European Languages**: English, Spanish, French, German, Italian, Portuguese, Russian, Polish, Dutch, etc.
+- **Asian Languages**: Chinese (Simplified & Traditional), Japanese, Korean, Hindi, Arabic, Thai, Vietnamese, etc.
+- **Other Languages**: Turkish, Hebrew, Persian, Indonesian, and many more
+
+### How It Works
+
+1. **Automatic Language Processing**: The LLM automatically detects and processes the article's language
+2. **Cross-Lingual Name Matching**: Handles name variations across scripts (Latin, Cyrillic, Arabic, Chinese characters, etc.)
+3. **Multilingual Age Detection**: Recognizes age/DOB phrases in any language (e.g., "años", "歳", "ans")
+4. **Cultural Context**: Considers cultural nuances when interpreting sentiment
+5. **English Output**: All analysis results are returned in English for consistency
+
+### Example Use Cases
+
+**Spanish Article:**
+```
+Article: "Bernie Madoff, de 70 años, fue condenado por fraude..."
+Result: Name found ✓, Age verified ✓, Sentiment: Negative
+```
+
+**Chinese Article:**
+```
+Article: "伯尼·麦道夫（70岁）因欺诈被判刑..."
+Result: Name found ✓, Age verified ✓, Sentiment: Negative
+```
+
+**French Article:**
+```
+Article: "Bernie Madoff, âgé de 70 ans, condamné pour fraude..."
+Result: Name found ✓, Age verified ✓, Sentiment: Negative
+```
+
+### Configuration
+
+No special configuration needed! The system automatically handles multilingual content.
+
+All prompts are configured to:
+- Process content in its original language
+- Return responses in English
+- Account for transliterations and language-specific variations
+- Handle different date formats (DD/MM/YYYY, MM/DD/YYYY, etc.)
 
 ---
-
 ## 🔧 Customization
 
 ### Adding New Verification Steps
@@ -244,13 +331,3 @@ GEMINI_MODEL_NAME = 'gemini-1.5-pro'  # or any other model
 ```
 
 ---
-
-## 📝 License
-
-[Add your license here]
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.

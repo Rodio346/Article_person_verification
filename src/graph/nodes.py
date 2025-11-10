@@ -4,7 +4,9 @@ Each node represents a step in the verification process.
 """
 
 import json
+import time
 import google.generativeai as genai
+from google.api_core import exceptions as google_exceptions
 from src.config import (
     GOOGLE_API_KEY,
     GEMINI_MODEL_NAME,
@@ -16,9 +18,84 @@ from src.config import (
 from src.utils import fetch_article_text
 from .state import GraphState
 
-# Configure the Gemini model
+# Configure the Gemini API globally
 genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+
+
+def get_fresh_model():
+    """
+    Create a fresh model instance for each API call.
+    This helps treat each call as independent and reduces rate limiting issues.
+
+    Returns:
+        A new GenerativeModel instance
+    """
+    return genai.GenerativeModel(GEMINI_MODEL_NAME)
+
+
+def call_llm_with_retry(prompt: str, max_retries: int = 5, initial_delay: float = 3.0, inter_call_delay: float = 2.0) -> tuple:
+    """
+    Call the LLM with exponential backoff retry logic for rate limiting.
+    Creates a fresh model instance for each call to simulate independent requests.
+
+    Args:
+        prompt: The prompt to send to the LLM
+        max_retries: Maximum number of retry attempts (increased to 5)
+        initial_delay: Initial delay in seconds before first retry (3s)
+        inter_call_delay: Delay after each successful call (2s)
+
+    Returns:
+        Tuple of (response_text, usage_metadata dict)
+        usage_metadata contains: prompt_tokens, completion_tokens, total_tokens
+
+    Raises:
+        Exception: If all retries are exhausted
+    """
+    delay = initial_delay
+
+    for attempt in range(max_retries):
+        try:
+            # Create a fresh model instance for each call
+            fresh_model = get_fresh_model()
+            response = fresh_model.generate_content(prompt)
+
+            # Extract token usage metadata
+            usage_metadata = {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0
+            }
+
+            if hasattr(response, 'usage_metadata'):
+                usage_metadata = {
+                    "prompt_tokens": getattr(response.usage_metadata, 'prompt_token_count', 0),
+                    "completion_tokens": getattr(response.usage_metadata, 'candidates_token_count', 0),
+                    "total_tokens": getattr(response.usage_metadata, 'total_token_count', 0)
+                }
+                print(f"--- Tokens: {usage_metadata['prompt_tokens']} prompt + {usage_metadata['completion_tokens']} completion = {usage_metadata['total_tokens']} total ---")
+
+            # Add delay after successful call to avoid rapid successive requests
+            time.sleep(inter_call_delay)
+
+            return response.text, usage_metadata
+        except Exception as e:
+            error_message = str(e)
+
+            # Check if it's a rate limit error (429)
+            if "429" in error_message or "quota" in error_message.lower() or "rate" in error_message.lower():
+                if attempt < max_retries - 1:
+                    print(f"--- Rate limit hit. Waiting {delay:.1f}s before retry {attempt + 1}/{max_retries - 1} ---")
+                    time.sleep(delay)
+                    delay *= 2  # Exponential backoff: 3s -> 6s -> 12s -> 24s -> 48s
+                else:
+                    print(f"--- Max retries exhausted. Rate limit error persists. ---")
+                    print(f"--- Consider increasing BATCH_PROCESSING_DELAY in settings.py ---")
+                    raise Exception(f"Rate limit exceeded after {max_retries} attempts: {error_message}")
+            else:
+                # For non-rate-limit errors, raise immediately
+                raise e
+
+    raise Exception(f"Failed after {max_retries} attempts")
 
 
 def fetch_article_node(state: GraphState) -> dict:
@@ -31,7 +108,11 @@ def fetch_article_node(state: GraphState) -> dict:
     Returns:
         Updated state with article_text
     """
-    print(f"--- Node: Fetching Article from {state['article_url']} ---")
+    try:
+        url_display = state['article_url'][:100] if len(state['article_url']) > 100 else state['article_url']
+        print(f"--- Node: Fetching Article from {url_display} ---")
+    except UnicodeEncodeError:
+        print(f"--- Node: Fetching Article [contains non-ASCII characters] ---")
     text = fetch_article_text(state['article_url'])
     return {"article_text": text}
 
@@ -54,13 +135,18 @@ def check_name_presence_node(state: GraphState) -> dict:
     )
 
     try:
-        response = model.generate_content(prompt)
-        cleaned_response = response.text.strip().lstrip('```json').rstrip('```').strip()
+        response_text, usage_metadata = call_llm_with_retry(prompt)
+        cleaned_response = response_text.strip().lstrip('```json').rstrip('```').strip()
         data = json.loads(cleaned_response)
+
+        # Update token usage tracking
+        token_usage = state.get('token_usage', {})
+        token_usage['check_name_presence'] = usage_metadata
 
         return {
             "name_is_present": data.get("name_is_present", False),
-            "name_check_explanation": data.get("explanation", "Error in parsing response.")
+            "name_check_explanation": data.get("explanation", "Error in parsing response."),
+            "token_usage": token_usage
         }
     except Exception as e:
         print(f"Error in check_name_presence_node: {e}")
@@ -89,13 +175,18 @@ def verify_age_node(state: GraphState) -> dict:
     )
 
     try:
-        response = model.generate_content(prompt)
-        cleaned_response = response.text.strip().lstrip('```json').rstrip('```').strip()
+        response_text, usage_metadata = call_llm_with_retry(prompt)
+        cleaned_response = response_text.strip().lstrip('```json').rstrip('```').strip()
         data = json.loads(cleaned_response)
+
+        # Update token usage tracking
+        token_usage = state.get('token_usage', {})
+        token_usage['verify_age'] = usage_metadata
 
         return {
             "age_matches": data.get("age_matches", True),
-            "age_check_explanation": data.get("explanation", "Error in parsing response.")
+            "age_check_explanation": data.get("explanation", "Error in parsing response."),
+            "token_usage": token_usage
         }
     except Exception as e:
         print(f"Error in verify_age_node: {e}")
@@ -141,13 +232,18 @@ def verify_details_node(state: GraphState) -> dict:
     )
 
     try:
-        response = model.generate_content(prompt)
-        cleaned_response = response.text.strip().lstrip('```json').rstrip('```').strip()
+        response_text, usage_metadata = call_llm_with_retry(prompt)
+        cleaned_response = response_text.strip().lstrip('```json').rstrip('```').strip()
         data = json.loads(cleaned_response)
+
+        # Update token usage tracking
+        token_usage = state.get('token_usage', {})
+        token_usage['verify_details'] = usage_metadata
 
         return {
             "match_decision": data.get("decision", "Review Required"),
-            "match_explanation": data.get("explanation", "Error in parsing response.")
+            "match_explanation": data.get("explanation", "Error in parsing response."),
+            "token_usage": token_usage
         }
     except Exception as e:
         print(f"Error in verify_details_node: {e}")
@@ -192,13 +288,18 @@ def assess_sentiment_node(state: GraphState) -> dict:
     )
 
     try:
-        response = model.generate_content(prompt)
-        cleaned_response = response.text.strip().lstrip('```json').rstrip('```').strip()
+        response_text, usage_metadata = call_llm_with_retry(prompt)
+        cleaned_response = response_text.strip().lstrip('```json').rstrip('```').strip()
         data = json.loads(cleaned_response)
+
+        # Update token usage tracking
+        token_usage = state.get('token_usage', {})
+        token_usage['assess_sentiment'] = usage_metadata
 
         return {
             "sentiment": data.get("sentiment", "Neutral"),
-            "sentiment_explanation": data.get("explanation", "Error in parsing response.")
+            "sentiment_explanation": data.get("explanation", "Error in parsing response."),
+            "token_usage": token_usage
         }
     except Exception as e:
         print(f"Error in assess_sentiment_node: {e}")

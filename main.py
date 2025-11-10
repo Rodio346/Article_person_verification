@@ -16,7 +16,7 @@ from src.config import (
     MLFLOW_TRACKING_URI,
     MLFLOW_EXPERIMENT_NAME,
     DEFAULT_TEST_CASES_FILE,
-    GEMINI_MODEL_NAME
+    GEMINI_MODEL_NAME,
 )
 from src.utils import load_test_cases
 from src.graph import build_graph
@@ -31,8 +31,13 @@ def run_verification(app, case: dict) -> None:
         case: Dictionary containing 'name', 'dob', and 'url' keys
     """
     print(f"\n{'='*50}")
-    print(f"RUNNING CASE FOR: {case['name']} ({case['dob']})")
-    print(f"URL: {case['url']}")
+    try:
+        print(f"RUNNING CASE FOR: {case['name']} ({case['dob']})")
+        print(f"URL: {case['url'][:100]}..." if len(case['url']) > 100 else f"URL: {case['url']}")
+    except UnicodeEncodeError:
+        # Fallback for Windows console encoding issues
+        print(f"RUNNING CASE FOR: {case['name']} ({case['dob']})")
+        print(f"URL: [Content contains non-ASCII characters]")
     print(f"{'='*50}")
 
     # Start MLflow run
@@ -71,7 +76,8 @@ def run_verification(app, case: dict) -> None:
             "match_decision": "Review Required",
             "match_explanation": "",
             "sentiment": "N/A",
-            "sentiment_explanation": ""
+            "sentiment_explanation": "",
+            "token_usage": {}
         }
 
         state_history = []
@@ -123,10 +129,16 @@ def run_verification(app, case: dict) -> None:
             final_state = current_state
 
             print("\n--- FINAL RESULT (logged to MLflow) ---")
-            print(f"  Match Decision: {final_state.get('match_decision')}")
-            print(f"  Explanation: {final_state.get('match_explanation')}")
-            print(f"  Sentiment: {final_state.get('sentiment', 'N/A')}")
-            print(f"  Explanation: {final_state.get('sentiment_explanation')}")
+            try:
+                print(f"  Match Decision: {final_state.get('match_decision')}")
+                print(f"  Explanation: {final_state.get('match_explanation')}")
+                print(f"  Sentiment: {final_state.get('sentiment', 'N/A')}")
+                print(f"  Explanation: {final_state.get('sentiment_explanation')}")
+            except UnicodeEncodeError:
+                print(f"  Match Decision: {final_state.get('match_decision')}")
+                print(f"  Explanation: [Contains non-ASCII characters - see MLflow artifacts]")
+                print(f"  Sentiment: {final_state.get('sentiment', 'N/A')}")
+                print(f"  Explanation: [Contains non-ASCII characters - see MLflow artifacts]")
 
             # Log key outcomes as tags (for easy filtering/grouping in MLflow UI)
             mlflow.set_tag("match_decision", final_state.get('match_decision', 'ERROR'))
@@ -154,6 +166,30 @@ def run_verification(app, case: dict) -> None:
             mlflow.log_metric("total_nodes_executed", total_nodes_executed)
             mlflow.log_metric("article_text_length", len(final_state.get('article_text', '')))
 
+            # Log token usage metrics
+            token_usage = final_state.get('token_usage', {})
+            total_prompt_tokens = 0
+            total_completion_tokens = 0
+            total_tokens = 0
+
+            for node_name, usage in token_usage.items():
+                # Log per-node token metrics
+                mlflow.log_metric(f"tokens_{node_name}_prompt", usage.get('prompt_tokens', 0))
+                mlflow.log_metric(f"tokens_{node_name}_completion", usage.get('completion_tokens', 0))
+                mlflow.log_metric(f"tokens_{node_name}_total", usage.get('total_tokens', 0))
+
+                # Accumulate totals
+                total_prompt_tokens += usage.get('prompt_tokens', 0)
+                total_completion_tokens += usage.get('completion_tokens', 0)
+                total_tokens += usage.get('total_tokens', 0)
+
+            # Log total token usage across all LLM calls
+            mlflow.log_metric("tokens_total_prompt", total_prompt_tokens)
+            mlflow.log_metric("tokens_total_completion", total_completion_tokens)
+            mlflow.log_metric("tokens_total_all", total_tokens)
+
+            print(f"--- Total Token Usage: {total_prompt_tokens} prompt + {total_completion_tokens} completion = {total_tokens} total ---")
+
             # Log explanations as parameters (truncate to avoid size limits)
             mlflow.log_param("name_check_explanation", final_state.get('name_check_explanation', '')[:500])
             mlflow.log_param("age_check_explanation", final_state.get('age_check_explanation', '')[:500])
@@ -165,6 +201,7 @@ def run_verification(app, case: dict) -> None:
             mlflow.log_dict(state_history, "run_state_history.json")
             mlflow.log_dict(final_state, "final_state.json")
             mlflow.log_dict(node_execution_times, "node_execution_times.json")
+            mlflow.log_dict(token_usage, "token_usage.json")
 
             # Create and log execution summary
             execution_summary = {
@@ -179,6 +216,9 @@ def run_verification(app, case: dict) -> None:
                 "age_matches": final_state.get('age_matches'),
                 "total_execution_time_seconds": round(total_execution_time, 2),
                 "total_nodes_executed": total_nodes_executed,
+                "total_tokens_used": total_tokens,
+                "total_prompt_tokens": total_prompt_tokens,
+                "total_completion_tokens": total_completion_tokens,
                 "execution_timestamp": datetime.now().isoformat()
             }
             mlflow.log_dict(execution_summary, "execution_summary.json")
@@ -231,7 +271,8 @@ def main():
     )
     parser.add_argument("--name", type=str, help="Applicant's full name")
     parser.add_argument("--dob", type=str, help="Applicant's date of birth (e.g., DD/MM/YYYY)")
-    parser.add_argument("--article", type=str, help="URL of the news article to screen")
+    parser.add_argument("--article", type=str, help="URL of the news article to screen OR direct article text")
+    parser.add_argument("--text", type=str, help="Direct article text (alternative to --article)")
     parser.add_argument("--test_file", type=str, help="Path to a CSV test file")
 
     args = parser.parse_args()
@@ -251,11 +292,13 @@ def main():
     test_cases_to_run = []
     if args.test_file:
         test_cases_to_run.extend(load_test_cases(args.test_file))
-    elif args.name and args.dob and args.article:
+    elif args.name and args.dob and (args.article or args.text):
+        # Use --text if provided, otherwise use --article (which can be URL or text)
+        article_input = args.text if args.text else args.article
         test_cases_to_run.append({
             "name": args.name,
             "dob": args.dob,
-            "url": args.article
+            "url": article_input  # Can be URL or direct text
         })
     else:
         print(f"\nNo inputs provided. Running with default '{DEFAULT_TEST_CASES_FILE}'.")
@@ -281,9 +324,20 @@ def main():
         try:
             run_verification(app, case)
             successful_runs += 1
+
+            # Add delay between cases (except for last case) to ensure independent API sessions
+            if idx < len(test_cases_to_run):
+                print(f"\n--- Waiting {BATCH_PROCESSING_DELAY}s before next case (rate limit protection) ---")
+                time.sleep(BATCH_PROCESSING_DELAY)
+
         except Exception as e:
             print(f"ERROR: Failed to process case: {e}")
             failed_runs += 1
+
+            # Add delay even on failure to prevent cascading rate limit errors
+            if idx < len(test_cases_to_run):
+                print(f"\n--- Waiting {BATCH_PROCESSING_DELAY}s before next case (rate limit protection) ---")
+                time.sleep(BATCH_PROCESSING_DELAY)
 
     # Print summary
     print(f"\n{'='*50}")
