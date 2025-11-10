@@ -45,9 +45,9 @@ Article_person_verification/
 ---
 
 ## ⚙️ How It Works
-
 The agent follows a defined graph structure with conditional routing to make intelligent decisions:
 
+![Work flow of the Project](image.png)
 ### Workflow Steps
 
 1. **`fetch_article`**: Scrapes the text content from the provided article URL using BeautifulSoup

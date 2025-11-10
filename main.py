@@ -23,7 +23,7 @@ from src.graph import build_graph
 mlflow.langchain.autolog()
 
 # Setup logger
-logger = setup_logger(name="ArticleVerification", log_level="INFO")
+logger = setup_logger(name="ArticleVerification", log_level="Debug")
 
 def run_verification(app, case: dict) -> None:
     """
@@ -291,6 +291,26 @@ def main():
     logger.info("Graph compiled successfully")
     logger.debug("Graph ASCII diagram:")
     logger.debug(f"\n{app.get_graph().draw_ascii()}")
+
+    # Save graph as image
+    try:
+        from pathlib import Path
+
+        # Create graphs directory if it doesn't exist
+        graphs_dir = Path("graphs")
+        graphs_dir.mkdir(exist_ok=True)
+
+        # Save as PNG
+        graph_image_path = graphs_dir / "workflow_graph.png"
+        graph = app.get_graph()
+        graph_image = graph.draw_mermaid_png()
+
+        with open(graph_image_path, 'wb') as f:
+            f.write(graph_image)
+
+        logger.info(f"Graph visualization saved to: {graph_image_path}")
+    except Exception as e:
+        logger.warning(f"Could not save graph image: {e}. This requires Mermaid CLI or graphviz to be installed.")
 
     # Determine test cases to run
     test_cases_to_run = []
