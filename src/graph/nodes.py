@@ -15,11 +15,14 @@ from src.config import (
     DETAIL_VERIFICATION_PROMPT,
     SENTIMENT_ANALYSIS_PROMPT
 )
-from src.utils import fetch_article_text
+from src.utils import fetch_article_text, get_logger
 from .state import GraphState
 
 # Configure the Gemini API globally
 genai.configure(api_key=GOOGLE_API_KEY)
+
+# Get logger for nodes
+logger = get_logger("ArticleVerification.Nodes")
 
 
 def get_fresh_model():
@@ -72,7 +75,7 @@ def call_llm_with_retry(prompt: str, max_retries: int = 5, initial_delay: float 
                     "completion_tokens": getattr(response.usage_metadata, 'candidates_token_count', 0),
                     "total_tokens": getattr(response.usage_metadata, 'total_token_count', 0)
                 }
-                print(f"--- Tokens: {usage_metadata['prompt_tokens']} prompt + {usage_metadata['completion_tokens']} completion = {usage_metadata['total_tokens']} total ---")
+                logger.debug(f"Tokens: {usage_metadata['prompt_tokens']} prompt + {usage_metadata['completion_tokens']} completion = {usage_metadata['total_tokens']} total")
 
             # Add delay after successful call to avoid rapid successive requests
             time.sleep(inter_call_delay)
@@ -84,12 +87,12 @@ def call_llm_with_retry(prompt: str, max_retries: int = 5, initial_delay: float 
             # Check if it's a rate limit error (429)
             if "429" in error_message or "quota" in error_message.lower() or "rate" in error_message.lower():
                 if attempt < max_retries - 1:
-                    print(f"--- Rate limit hit. Waiting {delay:.1f}s before retry {attempt + 1}/{max_retries - 1} ---")
+                    logger.warning(f"Rate limit hit. Waiting {delay:.1f}s before retry {attempt + 1}/{max_retries - 1}")
                     time.sleep(delay)
                     delay *= 2  # Exponential backoff: 3s -> 6s -> 12s -> 24s -> 48s
                 else:
-                    print(f"--- Max retries exhausted. Rate limit error persists. ---")
-                    print(f"--- Consider increasing BATCH_PROCESSING_DELAY in settings.py ---")
+                    logger.error("Max retries exhausted. Rate limit error persists.")
+                    logger.error("Consider increasing BATCH_PROCESSING_DELAY in settings.py")
                     raise Exception(f"Rate limit exceeded after {max_retries} attempts: {error_message}")
             else:
                 # For non-rate-limit errors, raise immediately
@@ -110,9 +113,9 @@ def fetch_article_node(state: GraphState) -> dict:
     """
     try:
         url_display = state['article_url'][:100] if len(state['article_url']) > 100 else state['article_url']
-        print(f"--- Node: Fetching Article from {url_display} ---")
+        logger.info(f"Node: Fetching Article from {url_display}")
     except UnicodeEncodeError:
-        print(f"--- Node: Fetching Article [contains non-ASCII characters] ---")
+        logger.info("Node: Fetching Article [contains non-ASCII characters]")
     text = fetch_article_text(state['article_url'])
     return {"article_text": text}
 
@@ -127,7 +130,7 @@ def check_name_presence_node(state: GraphState) -> dict:
     Returns:
         Updated state with name_is_present and name_check_explanation
     """
-    print("--- Node: Checking Name Presence ---")
+    logger.info("Node: Checking Name Presence")
 
     prompt = NAME_PRESENCE_PROMPT.format(
         applicant_name=state['applicant_name'],
@@ -149,7 +152,7 @@ def check_name_presence_node(state: GraphState) -> dict:
             "token_usage": token_usage
         }
     except Exception as e:
-        print(f"Error in check_name_presence_node: {e}")
+        logger.error(f"Error in check_name_presence_node: {e}", exc_info=True)
         return {
             "name_is_present": False,
             "name_check_explanation": f"LLM call or JSON parsing failed: {e}. Defaulting to 'name not present'."
@@ -166,7 +169,7 @@ def verify_age_node(state: GraphState) -> dict:
     Returns:
         Updated state with age_matches and age_check_explanation
     """
-    print("--- Node: Verifying Age ---")
+    logger.info("Node: Verifying Age")
 
     prompt = AGE_VERIFICATION_PROMPT.format(
         applicant_name=state['applicant_name'],
@@ -189,7 +192,7 @@ def verify_age_node(state: GraphState) -> dict:
             "token_usage": token_usage
         }
     except Exception as e:
-        print(f"Error in verify_age_node: {e}")
+        logger.error(f"Error in verify_age_node: {e}", exc_info=True)
         return {
             "age_matches": True,  # Benefit of doubt - proceed to detailed verification
             "age_check_explanation": f"LLM call or JSON parsing failed: {e}. Defaulting to age matches."
@@ -206,7 +209,7 @@ def set_age_mismatch_node(state: GraphState) -> dict:
     Returns:
         Updated state with match_decision and match_explanation
     """
-    print("--- Node: Setting Age Mismatch (Needs Verification) ---")
+    logger.info("Node: Setting Age Mismatch (Needs Verification)")
     return {
         "match_decision": "Age Mismatch - Needs Verification",
         "match_explanation": state["age_check_explanation"]
@@ -223,7 +226,7 @@ def verify_details_node(state: GraphState) -> dict:
     Returns:
         Updated state with match_decision and match_explanation
     """
-    print("--- Node: Verifying Details ---")
+    logger.info("Node: Verifying Details")
 
     prompt = DETAIL_VERIFICATION_PROMPT.format(
         applicant_name=state['applicant_name'],
@@ -246,7 +249,7 @@ def verify_details_node(state: GraphState) -> dict:
             "token_usage": token_usage
         }
     except Exception as e:
-        print(f"Error in verify_details_node: {e}")
+        logger.error(f"Error in verify_details_node: {e}", exc_info=True)
         return {
             "match_decision": "Review Required",
             "match_explanation": f"LLM call or JSON parsing failed: {e}. Manual review needed."
@@ -263,7 +266,7 @@ def set_name_non_match_node(state: GraphState) -> dict:
     Returns:
         Updated state with match_decision and match_explanation
     """
-    print("--- Node: Setting Non-Match (Name Not Found) ---")
+    logger.info("Node: Setting Non-Match (Name Not Found)")
     return {
         "match_decision": "Non-Match",
         "match_explanation": state["name_check_explanation"]
@@ -280,7 +283,7 @@ def assess_sentiment_node(state: GraphState) -> dict:
     Returns:
         Updated state with sentiment and sentiment_explanation
     """
-    print("--- Node: Assessing Sentiment ---")
+    logger.info("Node: Assessing Sentiment")
 
     prompt = SENTIMENT_ANALYSIS_PROMPT.format(
         applicant_name=state['applicant_name'],
@@ -302,7 +305,7 @@ def assess_sentiment_node(state: GraphState) -> dict:
             "token_usage": token_usage
         }
     except Exception as e:
-        print(f"Error in assess_sentiment_node: {e}")
+        logger.error(f"Error in assess_sentiment_node: {e}", exc_info=True)
         return {
             "sentiment": "Neutral",
             "sentiment_explanation": f"LLM call or JSON parsing failed: {e}. Defaulting to Neutral."

@@ -17,10 +17,13 @@ from src.config import (
     MLFLOW_EXPERIMENT_NAME,
     DEFAULT_TEST_CASES_FILE,
     GEMINI_MODEL_NAME,
-)
-from src.utils import load_test_cases
+    )
+from src.utils import load_test_cases, setup_logger
 from src.graph import build_graph
 mlflow.langchain.autolog()
+
+# Setup logger
+logger = setup_logger(name="ArticleVerification", log_level="INFO")
 
 def run_verification(app, case: dict) -> None:
     """
@@ -30,15 +33,16 @@ def run_verification(app, case: dict) -> None:
         app: Compiled LangGraph workflow
         case: Dictionary containing 'name', 'dob', and 'url' keys
     """
-    print(f"\n{'='*50}")
+    logger.info("=" * 50)
     try:
-        print(f"RUNNING CASE FOR: {case['name']} ({case['dob']})")
-        print(f"URL: {case['url'][:100]}..." if len(case['url']) > 100 else f"URL: {case['url']}")
+        logger.info(f"RUNNING CASE FOR: {case['name']} ({case['dob']})")
+        url_display = case['url'][:100] + "..." if len(case['url']) > 100 else case['url']
+        logger.info(f"URL: {url_display}")
     except UnicodeEncodeError:
         # Fallback for Windows console encoding issues
-        print(f"RUNNING CASE FOR: {case['name']} ({case['dob']})")
-        print(f"URL: [Content contains non-ASCII characters]")
-    print(f"{'='*50}")
+        logger.info(f"RUNNING CASE FOR: {case['name']} ({case['dob']})")
+        logger.info("URL: [Content contains non-ASCII characters]")
+    logger.info("=" * 50)
 
     # Start MLflow run
     run_name = f"Screening {case['name']} - {uuid.uuid4().hex[:8]}"
@@ -46,8 +50,8 @@ def run_verification(app, case: dict) -> None:
         run_id = run.info.run_id
         start_time = time.time()
 
-        print(f"--- Starting MLflow Run: {run_id} ---")
-        print(f"--- Run Name: {run_name} ---")
+        logger.info(f"Starting MLflow Run: {run_id}")
+        logger.info(f"Run Name: {run_name}")
 
         # Enable autologging for LangChain/LangGraph
         mlflow.langchain.autolog()
@@ -97,7 +101,7 @@ def run_verification(app, case: dict) -> None:
 
                 # Extract node name and output
                 node_name, node_output = list(chunk.items())[0]
-                print(f"--- [Step {step_counter}] Node '{node_name}' executed ---")
+                logger.debug(f"[Step {step_counter}] Node '{node_name}' executed")
 
                 # Update state
                 current_state.update(node_output)
@@ -128,17 +132,17 @@ def run_verification(app, case: dict) -> None:
             # Log final results
             final_state = current_state
 
-            print("\n--- FINAL RESULT (logged to MLflow) ---")
+            logger.info("FINAL RESULT (logged to MLflow)")
             try:
-                print(f"  Match Decision: {final_state.get('match_decision')}")
-                print(f"  Explanation: {final_state.get('match_explanation')}")
-                print(f"  Sentiment: {final_state.get('sentiment', 'N/A')}")
-                print(f"  Explanation: {final_state.get('sentiment_explanation')}")
+                logger.info(f"  Match Decision: {final_state.get('match_decision')}")
+                logger.info(f"  Explanation: {final_state.get('match_explanation')}")
+                logger.info(f"  Sentiment: {final_state.get('sentiment', 'N/A')}")
+                logger.info(f"  Explanation: {final_state.get('sentiment_explanation')}")
             except UnicodeEncodeError:
-                print(f"  Match Decision: {final_state.get('match_decision')}")
-                print(f"  Explanation: [Contains non-ASCII characters - see MLflow artifacts]")
-                print(f"  Sentiment: {final_state.get('sentiment', 'N/A')}")
-                print(f"  Explanation: [Contains non-ASCII characters - see MLflow artifacts]")
+                logger.info(f"  Match Decision: {final_state.get('match_decision')}")
+                logger.info("  Explanation: [Contains non-ASCII characters - see MLflow artifacts]")
+                logger.info(f"  Sentiment: {final_state.get('sentiment', 'N/A')}")
+                logger.info("  Explanation: [Contains non-ASCII characters - see MLflow artifacts]")
 
             # Log key outcomes as tags (for easy filtering/grouping in MLflow UI)
             mlflow.set_tag("match_decision", final_state.get('match_decision', 'ERROR'))
@@ -188,7 +192,7 @@ def run_verification(app, case: dict) -> None:
             mlflow.log_metric("tokens_total_completion", total_completion_tokens)
             mlflow.log_metric("tokens_total_all", total_tokens)
 
-            print(f"--- Total Token Usage: {total_prompt_tokens} prompt + {total_completion_tokens} completion = {total_tokens} total ---")
+            logger.info(f"Total Token Usage: {total_prompt_tokens} prompt + {total_completion_tokens} completion = {total_tokens} total")
 
             # Log explanations as parameters (truncate to avoid size limits)
             mlflow.log_param("name_check_explanation", final_state.get('name_check_explanation', '')[:500])
@@ -223,13 +227,14 @@ def run_verification(app, case: dict) -> None:
             }
             mlflow.log_dict(execution_summary, "execution_summary.json")
 
-            print(f"--- Total Execution Time: {total_execution_time:.2f}s ---")
-            print(f"--- MLflow Run {run_id} Finished ---")
+            logger.info(f"Total Execution Time: {total_execution_time:.2f}s")
+            logger.info(f"MLflow Run {run_id} Finished")
+            logger.info("=" * 50)
 
         except Exception as e:
             total_execution_time = time.time() - start_time
 
-            print(f"\n!!! Graph execution FAILED: {e} !!!")
+            logger.error(f"Graph execution FAILED: {e}", exc_info=True)
 
             # Log error details
             mlflow.set_tag("status", "FAILED")
@@ -258,9 +263,7 @@ def run_verification(app, case: dict) -> None:
             }
             mlflow.log_dict(error_summary, "error_summary.json")
 
-            print(f"--- MLflow Run {run_id} Marked as FAILED ---")
-
-        print(f"{'='*50}\n")
+            logger.error(f"MLflow Run {run_id} Marked as FAILED")
 
 
 def main():
@@ -280,13 +283,14 @@ def main():
     # Configure MLflow
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
-    print(f"MLflow tracking enabled. URI: {mlflow.get_tracking_uri()}")
-    print(f"Experiment: {MLFLOW_EXPERIMENT_NAME}")
+    logger.info(f"MLflow tracking enabled. URI: {mlflow.get_tracking_uri()}")
+    logger.info(f"Experiment: {MLFLOW_EXPERIMENT_NAME}")
 
     # Build and compile the graph
     app = build_graph()
-    print("\nGraph compiled. ASCII diagram:")
-    print(app.get_graph().draw_ascii())
+    logger.info("Graph compiled successfully")
+    logger.debug("Graph ASCII diagram:")
+    logger.debug(f"\n{app.get_graph().draw_ascii()}")
 
     # Determine test cases to run
     test_cases_to_run = []
@@ -301,14 +305,14 @@ def main():
             "url": article_input  # Can be URL or direct text
         })
     else:
-        print(f"\nNo inputs provided. Running with default '{DEFAULT_TEST_CASES_FILE}'.")
+        logger.info(f"No inputs provided. Running with default '{DEFAULT_TEST_CASES_FILE}'")
         if os.path.exists(DEFAULT_TEST_CASES_FILE):
             test_cases_to_run.extend(load_test_cases(DEFAULT_TEST_CASES_FILE))
         else:
-            print(f"\nError: '{DEFAULT_TEST_CASES_FILE}' not found. Please create it or provide inputs.")
+            logger.error(f"'{DEFAULT_TEST_CASES_FILE}' not found. Please create it or provide inputs.")
             exit(1)
 
-    print(f"\nTotal test cases to process: {len(test_cases_to_run)}\n")
+    logger.info(f"Total test cases to process: {len(test_cases_to_run)}")
 
     # Run verification for each test case
     successful_runs = 0
@@ -316,37 +320,37 @@ def main():
 
     for idx, case in enumerate(test_cases_to_run, 1):
         if not all(key in case for key in ['name', 'dob', 'url']):
-            print(f"Skipping invalid case: {case}")
+            logger.warning(f"Skipping invalid case: {case}")
             failed_runs += 1
             continue
 
-        print(f"\n[{idx}/{len(test_cases_to_run)}] Processing case...")
+        logger.info(f"[{idx}/{len(test_cases_to_run)}] Processing case...")
         try:
             run_verification(app, case)
             successful_runs += 1
 
             # Add delay between cases (except for last case) to ensure independent API sessions
             if idx < len(test_cases_to_run):
-                print(f"\n--- Waiting {BATCH_PROCESSING_DELAY}s before next case (rate limit protection) ---")
+                logger.debug(f"Waiting {BATCH_PROCESSING_DELAY}s before next case (rate limit protection)")
                 time.sleep(BATCH_PROCESSING_DELAY)
 
         except Exception as e:
-            print(f"ERROR: Failed to process case: {e}")
+            logger.error(f"Failed to process case: {e}", exc_info=True)
             failed_runs += 1
 
             # Add delay even on failure to prevent cascading rate limit errors
             if idx < len(test_cases_to_run):
-                print(f"\n--- Waiting {BATCH_PROCESSING_DELAY}s before next case (rate limit protection) ---")
+                logger.debug(f"Waiting {BATCH_PROCESSING_DELAY}s before next case (rate limit protection)")
                 time.sleep(BATCH_PROCESSING_DELAY)
 
     # Print summary
-    print(f"\n{'='*50}")
-    print(f"BATCH EXECUTION SUMMARY")
-    print(f"{'='*50}")
-    print(f"Total cases: {len(test_cases_to_run)}")
-    print(f"Successful: {successful_runs}")
-    print(f"Failed: {failed_runs}")
-    print(f"{'='*50}\n")
+    logger.info("=" * 50)
+    logger.info("BATCH EXECUTION SUMMARY")
+    logger.info("=" * 50)
+    logger.info(f"Total cases: {len(test_cases_to_run)}")
+    logger.info(f"Successful: {successful_runs}")
+    logger.info(f"Failed: {failed_runs}")
+    logger.info("=" * 50)
 
 
 if __name__ == "__main__":
