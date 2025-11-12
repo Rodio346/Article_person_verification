@@ -20,7 +20,7 @@ wheels/
 .installed.cfg
 *.egg
 logs/
-
+evaluation_results/
 # Environment
 .env
 .venv

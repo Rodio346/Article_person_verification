@@ -23,10 +23,17 @@ mentioned in the Article Text?
 - Search for the name in the article regardless of the article's language
 - Account for transliterations and language-specific name variations
 - Consider that names may be written differently across languages (e.g., Chinese characters, Arabic script, Cyrillic)
+- **IMPORTANT for non-Latin scripts**:
+  - East Asian names (Chinese/Korean/Japanese) may appear in surname-first order (e.g., "Zhang Wei" for "Wei Zhang")
+  - Russian/Slavic names may use patronymics (middle names based on father's name, e.g., "Olga Ivanovna")
+  - Cyrillic names may be transliterated differently (e.g., "Olena" = "Елена")
+  - Accented characters may be written without accents (e.g., "José" = "Jose", "María" = "Maria")
+  - Arabic names may have "Al-" or "bin" prefixes that vary
+- If you see name parts matching but in different order or with variations, consider it a match
 
 Respond in a single, valid JSON object with two keys (response must be in English):
 - "name_is_present": true or false
-- "explanation": A brief reason in English. (e.g., "Name 'Bernie Madoff' found in Spanish article." or "Name not found in French article.")
+- "explanation": A brief reason in English. (e.g., "Name 'Bernie Madoff' found in Spanish article." or "Name 'Zhang Wei' found in surname-first order as '张伟' in Chinese article." or "Name not found.")
 """
 
 # --- Age Verification Prompt ---
@@ -99,7 +106,7 @@ Your JSON response MUST have exactly two keys: "decision" and "explanation" (bot
 # --- Sentiment Analysis Prompt ---
 
 SENTIMENT_ANALYSIS_PROMPT = """
-You are a multilingual analyst capable of processing articles in any language. You are reviewing an article about a specific person.
+You are a multilingual risk analyst for a financial institution, capable of processing articles in any language. You are reviewing an article about a specific person for adverse media screening.
 The article has already been determined to be about: {applicant_name}.
 
 **IMPORTANT**: The article may be in any language (English, Spanish, French, German, Chinese, Arabic, etc.).
@@ -109,20 +116,54 @@ Article Text:
 {article_text}
 
 Analyze the article and determine if it portrays this person in a positive, negative, or neutral light,
-specifically in a regulated financial context.
+specifically from a financial risk and regulatory compliance perspective.
 
 **Sentiment Guidelines (applicable across all languages):**
-- "Negative" includes: lawsuits, scandals, fraud, bankruptcies, criminal activity, corruption, investigations, penalties, violations
-- "Positive" includes: philanthropy, achievements, industry awards, successful ventures, leadership praise, innovations
-- "Neutral" includes: simple news reports, job changes, objective statements, factual announcements
+
+**"Negative"** - ANY of these RED FLAGS indicate negative sentiment:
+- Legal issues: lawsuits, legal disputes, court cases, trials, convictions, settlements
+- Financial crimes: fraud, embezzlement, money laundering, tax evasion, Ponzi schemes
+- Regulatory: investigations, penalties, fines, violations, sanctions, bans
+- Business failures: bankruptcies, insolvencies, business closures, liquidations
+- Ethical concerns: corruption, bribery, conflicts of interest, misrepresentation
+- Reputational damage: scandals, controversies, accusations, allegations (even if unproven)
+- **If ANY negative element exists, classify as "Negative" even if some positive aspects are also present**
+
+**"Positive"** - ONLY if NO negative elements AND has positive content:
+- Philanthropy, charitable work, donations, humanitarian efforts
+- Professional achievements, industry awards, recognition for excellence
+- Successful business ventures, innovations, positive leadership
+- Community contributions, social impact initiatives
+- **Must be unequivocally positive with no controversies or red flags**
+
+**"Neutral"** - Default for factual content without clear positive/negative:
+- Simple news reports, objective statements
+- Job appointments, position changes (without context)
+- Routine business announcements
+- Biographical information without sentiment
+- **Use "Neutral" when in doubt between Positive/Negative**
+
+**CRITICAL DECISION RULES:**
+1. **Prioritize negative indicators** - Even one serious red flag = "Negative"
+2. **Be conservative** - If uncertain between Negative and Neutral, choose "Negative" for risk management
+3. **Avoid positive bias** - Don't assume positive unless explicitly clear
+4. **Context matters** - A "sentenced" person is negative even if they "donated to charity"
 
 **Instructions:**
 - Understand the article's content regardless of language
-- Identify sentiment-carrying words/phrases in the original language
-- Consider cultural context when interpreting sentiment
-- Focus on facts and tone rather than just keywords
+- Look for negative keywords in the original language (e.g., "fraud"/"fraude"/"欺诈", "scandal"/"escándalo"/"丑闻")
+- Consider cultural context but prioritize factual negative events
+- **When in doubt, err on the side of caution (Negative or Neutral, not Positive)**
 
 Provide your response in a single, valid JSON object with two keys (response must be in English):
 - "sentiment" must be one of: "Positive", "Negative", "Neutral".
-- "explanation": A brief justification in English for your sentiment, mentioning the language of the article if not English.
+- "explanation": A brief justification in English explaining WHY you chose this sentiment, citing specific facts from the article and mentioning the language if not English.
+
+**Examples:**
+- "Sentenced to 10 years for fraud" → "Negative" (legal issue)
+- "Under investigation for money laundering" → "Negative" (regulatory red flag)
+- "Declared bankruptcy after business failure" → "Negative" (business failure)
+- "Donated $1M to charity" → "Positive" (only if no negative elements)
+- "Appointed as CEO of XYZ Corp" → "Neutral" (routine announcement)
+- "Won lawsuit but previously accused of fraud" → "Negative" (fraud accusation is red flag)
 """

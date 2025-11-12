@@ -15,7 +15,7 @@ from src.config import (
     DETAIL_VERIFICATION_PROMPT,
     SENTIMENT_ANALYSIS_PROMPT
 )
-from src.utils import fetch_article_text, get_logger
+from src.utils import fetch_article_text, quick_name_check, get_logger
 from .state import GraphState
 
 # Configure the Gemini API globally
@@ -123,6 +123,10 @@ def fetch_article_node(state: GraphState) -> dict:
 def check_name_presence_node(state: GraphState) -> dict:
     """
     Node 1 (LLM Call 1): Checks if the applicant's name or variation is present.
+    Uses a 3-tier approach:
+    1. Exact match (regex) → Skip LLM, name is present
+    2. Partial match → Call LLM to verify variations/nicknames
+    3. No match → Skip LLM, name not present
 
     Args:
         state: Current graph state
@@ -131,6 +135,28 @@ def check_name_presence_node(state: GraphState) -> dict:
         Updated state with name_is_present and name_check_explanation
     """
     logger.info("Node: Checking Name Presence")
+
+    # Quick pre-filter: Check if name appears in article using keyword search
+    confidence_level, name_found = quick_name_check(state['applicant_name'], state['article_text'])
+
+    # Case 1: EXACT MATCH - Full name found directly in article
+    if confidence_level == "exact":
+        logger.info(f"✓ Quick name check: EXACT match found for '{state['applicant_name']}' (skipping LLM call)")
+        return {
+            "name_is_present": True,
+            "name_check_explanation": f"Exact match: '{state['applicant_name']}' found directly in article text via regex. LLM call skipped for efficiency."
+        }
+
+    # Case 2: NO MATCH - Name not found at all
+    if confidence_level == "none":
+        logger.info(f"✗ Quick name check: NO match found for '{state['applicant_name']}' (skipping LLM call)")
+        return {
+            "name_is_present": False,
+            "name_check_explanation": f"No match: '{state['applicant_name']}' or significant name parts not found in article. LLM call skipped for efficiency."
+        }
+
+    # Case 3: PARTIAL MATCH - Name parts found, need LLM to verify variations/nicknames
+    logger.info(f"⚠ Quick name check: PARTIAL match found for '{state['applicant_name']}' (calling LLM to verify variations)")
 
     prompt = NAME_PRESENCE_PROMPT.format(
         applicant_name=state['applicant_name'],

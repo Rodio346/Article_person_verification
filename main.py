@@ -192,6 +192,18 @@ def run_verification(app, case: dict) -> None:
             mlflow.log_metric("tokens_total_completion", total_completion_tokens)
             mlflow.log_metric("tokens_total_all", total_tokens)
 
+            # Track if LLM call was skipped for name check (cost optimization)
+            llm_calls_made = len(token_usage)
+            name_check_skipped = 'check_name_presence' not in token_usage and not final_state.get('name_is_present', False)
+            mlflow.log_metric("llm_calls_made", llm_calls_made)
+            mlflow.log_metric("name_check_llm_skipped", 1 if name_check_skipped else 0)
+
+            if name_check_skipped:
+                logger.info("Quick name check: LLM call SKIPPED (name not found via keyword search)")
+                logger.info(f"LLM Calls Made: {llm_calls_made}/4 (saved 1 call)")
+            else:
+                logger.info(f"LLM Calls Made: {llm_calls_made}")
+
             logger.info(f"Total Token Usage: {total_prompt_tokens} prompt + {total_completion_tokens} completion = {total_tokens} total")
 
             # Log explanations as parameters (truncate to avoid size limits)

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(timeout 10 cmd /c \"timeout 5 > nul 2>&1 & echo Waiting...\")",
+      "Bash(nul)",
+      "Bash(timeout 45 ping:*)",
+      "Bash(timeout 120 ping:*)",
+      "Bash(dir:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

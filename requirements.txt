@@ -1,7 +1,38 @@
-langgraph
-google-generativeai
-requests
-beautifulsoup4
-python-dotenv
-mlflow
-grandalf
+# Article Person Verification System - Requirements
+# Python 3.8+
+
+# Core Dependencies
+# ================
+
+# LangGraph for workflow management
+langgraph>=0.0.20
+langchain>=0.1.0
+langchain-core>=0.1.0
+
+# Google Gemini AI
+google-generativeai>=0.3.0
+
+# MLflow for experiment tracking
+mlflow>=2.9.0
+
+# Web scraping
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# Data processing
+pandas>=2.0.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Optional Dependencies (for graph visualization)
+# ===============================================
+# Uncomment if you want to save graph visualizations
+# pygraphviz>=1.11  # Requires Graphviz to be installed on system
+# pydot>=1.4.2
+
+# Development Dependencies (optional)
+# ===================================
+# pytest>=7.4.0  # For running tests
+# black>=23.0.0  # For code formatting
+# flake8>=6.0.0  # For linting

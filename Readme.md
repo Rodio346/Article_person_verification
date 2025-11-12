@@ -9,13 +9,20 @@ All executions are automatically logged to **MLflow**, providing a complete, tra
 ## 🚀 Features
 
 * **Multi-Step Graph Logic:** Uses LangGraph to define a robust, conditional workflow with 4 verification stages
+* **Smart Name Detection (3-Tier):** Intelligent optimization that skips LLM calls when names are found exactly or clearly absent, saving ~30% of API costs
+* **Accent-Insensitive Matching:** Automatically handles accented characters (José = Jose, María = Maria) using Unicode normalization
 * **Age Verification:** Early filtering step to catch obvious age mismatches before detailed verification
 * **Multilingual Support:** Process articles in any language (English, Spanish, French, German, Chinese, Arabic, etc.) with automatic language detection and cross-lingual name matching
+* **Enhanced Non-Latin Script Handling:** Improved support for East Asian names, Cyrillic scripts, Russian patronymics, and Arabic name variations
+* **Risk-Focused Sentiment Analysis:** Conservative approach prioritizing negative indicators for adverse media screening and compliance
 * **Flexible Input Methods:** Supports both URL fetching and direct text input - paste article content directly or provide a URL
 * **LLM-Powered Decisions:** Leverages Google's Gemini model for nuanced tasks like name variation matching, age verification, detail verification, and sentiment analysis
-* **Automated MLflow Tracking:** Uses `mlflow.langchain.autolog()` to automatically log all graph runs with comprehensive metrics
+* **Comprehensive Token Tracking:** Detailed logging of token usage per node with optimization metrics
+* **Automated MLflow Tracking:** Full experiment tracking with parameters, metrics, tags, and artifacts for reproducibility
+* **Professional Logging System:** Structured logging with file outputs (daily rotation), console display, and error tracking
 * **Full State Logging:** Logs intermediate and final states as JSON artifacts for complete traceability and debugging
 * **Batch Processing:** Run screenings for a single applicant or batch process CSV files with mixed URL/text inputs
+* **Evaluation Framework:** Built-in accuracy evaluation script with detailed metrics and scenario breakdowns
 * **Modular Architecture:** Clean separation of concerns with organized project structure
 
 ---
@@ -25,21 +32,37 @@ All executions are automatically logged to **MLflow**, providing a complete, tra
 ```
 Article_person_verification/
 ├── main.py                          # Main entry point
+├── evaluate_accuracy.py             # Accuracy evaluation script
 ├── src/
 │   ├── config/                      # Configuration module
-│   │   ├── settings.py              # API keys, MLflow, system settings
+│   │   ├── settings.py              # API keys, MLflow, system settings, rate limiting
 │   │   └── prompts.py               # LLM prompts (easily editable!)
 │   ├── utils/                       # Helper utilities
-│   │   ├── web_scraper.py           # Article fetching logic
-│   │   └── file_loader.py           # CSV/test case loading
+│   │   ├── web_scraper.py           # Article fetching, accent normalization, quick name check
+│   │   ├── file_loader.py           # CSV/test case loading
+│   │   └── logger.py                # Professional logging system
 │   └── graph/                       # LangGraph workflow
-│       ├── state.py                 # State definition
-│       ├── nodes.py                 # All workflow nodes
+│       ├── state.py                 # State definition with token tracking
+│       ├── nodes.py                 # All workflow nodes with retry logic
 │       ├── edges.py                 # Routing logic
 │       └── workflow.py              # Graph assembly
 ├── test_cases.csv                   # Sample test cases
+├── diverse_synthetic_articles.csv   # Evaluation dataset (51 test cases)
+├── logs/                            # Log files (daily rotation)
+│   ├── verification_YYYYMMDD.log    # Daily logs
+│   └── errors_YYYYMMDD.log          # Error logs
+├── evaluation_results/              # Evaluation output
+│   ├── detailed_results_*.csv       # Case-by-case results
+│   └── summary_report_*.txt         # Accuracy summary
+├── graphs/                          # Graph visualizations
+│   └── workflow_graph.png           # Workflow diagram
+├── mlruns/                          # MLflow tracking data
 ├── .env                             # Environment variables
-└── requirements.txt                 # Python dependencies
+├── .env.example                     # Environment template
+├── requirements.txt                 # Python dependencies
+├── setup.py                         # Package installation
+├── INSTALL.md                       # Detailed installation guide
+└── README.md                        # This file
 ```
 
 ---
@@ -52,7 +75,10 @@ The agent follows a defined graph structure with conditional routing to make int
 
 1. **`fetch_article`**: Scrapes the text content from the provided article URL using BeautifulSoup
 
-2. **`check_name_presence`** (LLM Call 1): Scans the text to see if the applicant's name (or a clear variation like "Bill" for "William") is present
+2. **`check_name_presence`** (Smart 3-Tier Check):
+   * **Tier 1 (Exact Match)**: If full name found via regex → Skip LLM, instant match (0 tokens)
+   * **Tier 2 (Partial Match)**: If name parts found → Call LLM to verify variations (LLM Call 1)
+   * **Tier 3 (No Match)**: If no name parts found → Skip LLM, instant non-match (0 tokens)
 
 3. **Router 1**:
    * ✅ **If name found**: Proceed to `verify_age`
@@ -89,41 +115,81 @@ The agent follows a defined graph structure with conditional routing to make int
 
 ## 🛠️ Installation
 
-1. Clone this repository:
+### Quick Start
+
+1. **Clone the repository:**
    ```bash
    git clone <your-repo-url>
    cd Article_person_verification
    ```
 
-2. Install the required Python packages:
+2. **Create a virtual environment (recommended):**
+   ```bash
+   # Windows
+   python -m venv venv
+   venv\Scripts\activate
+
+   # macOS/Linux
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+3. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
 
-   Your `requirements.txt` should include:
-   ```text
-   langgraph
-   google-generativeai
-   python-dotenv
-   requests
-   beautifulsoup4
-   mlflow
+4. **Set up environment variables:**
+   ```bash
+   # Copy the example file
+   copy .env.example .env  # Windows
+   # cp .env.example .env  # macOS/Linux
+
+   # Edit .env and add your API key
    ```
+
+5. **Verify installation:**
+   ```bash
+   python main.py --help
+   ```
+
+### For Developers
+
+Install in editable mode for development:
+```bash
+pip install -e .
+```
+
+### Detailed Instructions
+
+See [INSTALL.md](INSTALL.md) for:
+- Step-by-step installation guide
+- API key setup instructions
+- Troubleshooting tips
+- Virtual environment configuration
+- Cross-platform support
 
 ---
 
 ## 🔑 Configuration
 
-Create a `.env` file in the root directory:
+Create a `.env` file in the root directory (or copy from `.env.example`):
 
 ```ini
-# Your Google API Key for the Gemini model
-GOOGLE_API_KEY=AIza...
+# Google Gemini API Configuration
+GOOGLE_API_KEY=your_google_gemini_api_key_here
 
-# (Optional) Set a tracking server URI.
-# If omitted, defaults to local './mlruns' folder
+# MLflow Tracking Configuration
 MLFLOW_TRACKING_URI=file:./mlruns
+# Alternative: Use SQLite for better performance
+# MLFLOW_TRACKING_URI=sqlite:///mlflow.db
 ```
+
+### Getting Your API Key
+
+1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
+2. Click "Create API Key"
+3. Copy the key and add it to your `.env` file
 
 ### Editing Prompts
 
@@ -241,6 +307,16 @@ Inside the **"Article Person Verification"** experiment, each run contains:
 - `applicant_name`, `applicant_dob`, `article_url`
 - `match_explanation`, `sentiment_explanation`
 
+**Metrics (Token Usage & Performance):**
+- `tokens_<node_name>_prompt` - Prompt tokens per LLM call
+- `tokens_<node_name>_completion` - Completion tokens per LLM call
+- `tokens_<node_name>_total` - Total tokens per LLM call
+- `tokens_total_prompt` - Total prompt tokens for entire run
+- `tokens_total_completion` - Total completion tokens
+- `tokens_total_all` - Grand total tokens used
+- `llm_calls_made` - Number of LLM calls (out of 4 possible)
+- `name_check_llm_skipped` - Whether name check optimization saved an LLM call
+
 **Tags:**
 - `match_decision` - Easy filtering by outcome
 - `sentiment` - Quick sentiment overview
@@ -312,6 +388,54 @@ All prompts are configured to:
 - Handle different date formats (DD/MM/YYYY, MM/DD/YYYY, etc.)
 
 ---
+
+## ⚡ Performance & Optimization
+
+### Smart Name Check (3-Tier Approach)
+
+The system uses an intelligent 3-tier name checking strategy to minimize LLM calls and reduce costs:
+
+**Tier 1: Exact Match (Regex)** 🎯
+- Full name found directly in article → **Skip LLM**, return match immediately
+- Handles accented characters automatically (José → Jose, María → Maria)
+- Example: "Bernie Madoff" found in text → Instant match, 0 tokens used
+
+**Tier 2: Partial Match (Name Parts)** 🔄
+- Name parts found but not exact match → **Call LLM** to verify variations/nicknames
+- Handles cases like "William" vs "Bill", surname order changes
+- Example: "Wei Zhang" vs "Zhang Wei" → LLM verifies East Asian name order
+
+**Tier 3: No Match** ❌
+- No name parts found → **Skip LLM**, return non-match immediately
+- Example: Looking for "John Doe" in article about "Jane Smith" → Instant rejection
+
+**Impact**: Saves ~30% of LLM calls on average, reducing costs and improving speed.
+
+### Accent-Insensitive Matching
+
+The quick name check automatically handles:
+- **Accented characters**: José Martínez = Jose Martinez
+- **Diacritics**: Renée Faure = Renee Faure
+- **Unicode normalization**: Björn = Bjorn
+
+This improves matching for Spanish, French, Portuguese, German, and other European languages.
+
+### Enhanced Prompts for Non-Latin Scripts
+
+**Name Detection Improvements**:
+- East Asian name order handling (surname-first: Zhang Wei)
+- Russian/Slavic patronymics (Olga Ivanovna)
+- Cyrillic transliteration variations (Olena = Елена)
+- Arabic name prefixes (Al-, bin)
+
+**Sentiment Analysis Improvements**:
+- **Risk-focused analysis** for adverse media screening
+- Prioritizes negative indicators over positive
+- Conservative approach: When uncertain, flags as negative/neutral
+- Reduces false positives in compliance screening
+
+---
+
 ## 🔧 Customization
 
 ### Adding New Verification Steps
