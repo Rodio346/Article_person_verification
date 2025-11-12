@@ -389,50 +389,7 @@ All prompts are configured to:
 
 ---
 
-## ⚡ Performance & Optimization
 
-### Smart Name Check (3-Tier Approach)
-
-The system uses an intelligent 3-tier name checking strategy to minimize LLM calls and reduce costs:
-
-**Tier 1: Exact Match (Regex)** 🎯
-- Full name found directly in article → **Skip LLM**, return match immediately
-- Handles accented characters automatically (José → Jose, María → Maria)
-- Example: "Bernie Madoff" found in text → Instant match, 0 tokens used
-
-**Tier 2: Partial Match (Name Parts)** 🔄
-- Name parts found but not exact match → **Call LLM** to verify variations/nicknames
-- Handles cases like "William" vs "Bill", surname order changes
-- Example: "Wei Zhang" vs "Zhang Wei" → LLM verifies East Asian name order
-
-**Tier 3: No Match** ❌
-- No name parts found → **Skip LLM**, return non-match immediately
-- Example: Looking for "John Doe" in article about "Jane Smith" → Instant rejection
-
-**Impact**: Saves ~30% of LLM calls on average, reducing costs and improving speed.
-
-### Accent-Insensitive Matching
-
-The quick name check automatically handles:
-- **Accented characters**: José Martínez = Jose Martinez
-- **Diacritics**: Renée Faure = Renee Faure
-- **Unicode normalization**: Björn = Bjorn
-
-This improves matching for Spanish, French, Portuguese, German, and other European languages.
-
-### Enhanced Prompts for Non-Latin Scripts
-
-**Name Detection Improvements**:
-- East Asian name order handling (surname-first: Zhang Wei)
-- Russian/Slavic patronymics (Olga Ivanovna)
-- Cyrillic transliteration variations (Olena = Елена)
-- Arabic name prefixes (Al-, bin)
-
-**Sentiment Analysis Improvements**:
-- **Risk-focused analysis** for adverse media screening
-- Prioritizes negative indicators over positive
-- Conservative approach: When uncertain, flags as negative/neutral
-- Reduces false positives in compliance screening
 
 ---
 
